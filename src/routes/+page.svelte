@@ -9,18 +9,54 @@
         collection,
         getDocs
     } from 'firebase/firestore';
+    import { connectStorageEmulator } from 'firebase/storage';
+    import { onMount } from 'svelte';
 
-
-    async function allSongs(){
-        const collectionRef = collection(db, 'songs');
-        const querySnapshot = await getDocs(collectionRef);
-        
-        return querySnapshot;
+    // Define the interface for a song
+    interface Song {
+        id: string;
+        title: string;
+        artist: string;
+        bid?: number;  // optional field
     }
 
-    console.log(allSongs());
+    // Initialize songs array with the correct type
+    let songs: Song[] = [];
+
+    async function allSongs(): Promise<Song[]> {
+        const collectionRef = collection(db, 'songs');
+        const querySnapshot = await getDocs(collectionRef);
+        return querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        } as Song));  // Type assertion to Song
+    }
+
+    onMount(async () => {
+        try {
+            songs = await allSongs();
+            console.log("Firebase Output:", songs);
+        } catch (error) {
+            console.error("Error fetching songs:", error);
+        }
+    });
 </script>
 
-<h1>Welcome to SvelteKit</h1>
+<h1>SvelteKit App</h1>
 
-<p>Visit <a href="https://kit.svelte.dev">kit.svelte.dev</a> to read the documentation</p>
+{#each songs as song}
+    <div class="song">
+        <h3>{song.title}</h3>
+        <p>Artist: {song.artist}</p>
+        <p>Current Bid: ${song.bid ?? 0}</p>
+    </div>
+{/each}
+
+<style>
+    .song {
+        border: 1px solid #ccc;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 4px;
+    }
+</style>
