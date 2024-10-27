@@ -1,62 +1,101 @@
 <script lang="ts">
     import { db } from '$lib/firebase';
     import {
-        arrayRemove,
-        arrayUnion,
-        doc,
-        setDoc,
-        updateDoc,
         collection,
-        getDocs
+        getDocs,
+        query,
+        orderBy,
+        limit
     } from 'firebase/firestore';
-    import { connectStorageEmulator } from 'firebase/storage';
     import { onMount } from 'svelte';
+    import SongCard from '$lib/components/SongCard.svelte';
+    import BidModal from '$lib/components/BidModal.svelte';
+    import type { Song } from '$lib/types/song';
 
-    // Define the interface for a song
-    interface Song {
-        id: string;
-        title: string;
-        artist: string;
-        bid?: number;  // optional field
+    let songs: Song[] = [];
+    let nextUpSong: Song | null = null;
+
+    async function getNextUpSong(): Promise<Song | null> {
+        const collectionRef = collection(db, 'songs');
+        const q = query(collectionRef, orderBy('bid', 'desc'), limit(1));
+        const querySnapshot = await getDocs(q);
+        
+        if (querySnapshot.empty) return null;
+        
+        return {
+            id: querySnapshot.docs[0].id,
+            ...querySnapshot.docs[0].data()
+        } as Song;
     }
 
-    // Initialize songs array with the correct type
-    let songs: Song[] = [];
-
-    async function allSongs(): Promise<Song[]> {
+    async function getRemainingongs(): Promise<Song[]> {
         const collectionRef = collection(db, 'songs');
         const querySnapshot = await getDocs(collectionRef);
-        return querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        } as Song));  // Type assertion to Song
+        return querySnapshot.docs
+            .map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            } as Song))
+            .filter(song => song.id !== nextUpSong?.id)
+            .sort((a, b) => (b.bid || 0) - (a.bid || 0));
     }
 
     onMount(async () => {
         try {
-            songs = await allSongs();
-            console.log("Firebase Output:", songs);
+            nextUpSong = await getNextUpSong();
+            songs = await getRemainingongs();
+            console.log("Next Up Song:", nextUpSong);
+            console.log("Remaining Songs:", songs);
         } catch (error) {
             console.error("Error fetching songs:", error);
         }
     });
 </script>
 
-<h1>SvelteKit App</h1>
+<div class="container">
+    {#if nextUpSong}
+        <div class="next-up-section">
+            <h2 class="next-up-title">Next Up</h2>
+            <div class="next-up-card">
+                <SongCard song={nextUpSong} isNextUp={true} />
+            </div>
+        </div>
+    {/if}
 
-{#each songs as song}
-    <div class="song">
-        <h3>{song.title}</h3>
-        <p>Artist: {song.artist}</p>
-        <p>Current Bid: ${song.bid ?? 0}</p>
+    <div class="queue-section">
+        <h2>Queue</h2>
+        {#each songs as song}
+            <SongCard {song} />
+        {/each}
     </div>
-{/each}
+</div>
+
+<BidModal />
 
 <style>
-    .song {
-        border: 1px solid #ccc;
+    .container {
+        max-width: 800px;
+        margin: 0 auto;
         padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 4px;
+    }
+
+    .next-up-section {
+        margin-bottom: 2rem;
+        padding: 1rem;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+    }
+
+    .next-up-title {
+        color: #2c3e50;
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
+        text-align: center;
+    }
+
+    .queue-section h2 {
+        color: #2c3e50;
+        font-size: 1.25rem;
+        margin-bottom: 1rem;
     }
 </style>
