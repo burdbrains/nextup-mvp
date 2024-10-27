@@ -1,32 +1,33 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, createEventDispatcher } from 'svelte';
     import { scale } from 'svelte/transition';
     import { db } from '$lib/firebase';
     import { doc, getDoc, updateDoc } from 'firebase/firestore';
     import { MINIMUM_BID_INCREMENT, currentSong, isModalOpen } from '$lib/stores/bid-store';
 
+    const dispatch = createEventDispatcher();
+
     let dialog: HTMLDialogElement;
     let userBid: number = MINIMUM_BID_INCREMENT;
     let errorMessage: string = '';
     let loading: boolean = false;
-    let currentDbBid: number = $currentSong?.bid || 0;
+    let currentDbBid: number = 0;
 
-    $: totalBid = (currentDbBid || 0) + userBid;
-    $: minBid = MINIMUM_BID_INCREMENT;
     $: if ($isModalOpen && dialog && !dialog.open) {
         dialog.showModal();
+        currentDbBid = $currentSong?.bid || 0;
+        errorMessage = '';
+        userBid = MINIMUM_BID_INCREMENT;
     } else if (!$isModalOpen && dialog?.open) {
         dialog.close();
     }
 
-    // Handle escape key globally
     function handleKeydown(event: KeyboardEvent) {
         if (event.key === 'Escape' && dialog?.open) {
             closeModal();
         }
     }
 
-    // Rest of your existing functions...
     async function checkCurrentBid() {
         if (!$currentSong) return;
         
@@ -38,8 +39,11 @@
             if (newDbBid !== currentDbBid) {
                 errorMessage = `Base bid has changed to $${newDbBid}`;
                 currentDbBid = newDbBid;
+                return false;
             }
+            return true;
         }
+        return false;
     }
 
     async function updateBid() {
@@ -49,21 +53,24 @@
         errorMessage = '';
         
         try {
-            await checkCurrentBid();
+            const currentBidValid = await checkCurrentBid();
+            if (!currentBidValid) return;
             
-            if (userBid < minBid) {
-                errorMessage = `Minimum bid increment is $${minBid}`;
+            if (userBid < MINIMUM_BID_INCREMENT) {
+                errorMessage = `Minimum bid increment is $${MINIMUM_BID_INCREMENT}`;
                 return;
             }
 
+            const newBidTotal = currentDbBid + userBid;
             const docRef = doc(db, 'songs', $currentSong.id);
             await updateDoc(docRef, {
-                bid: totalBid
+                bid: newBidTotal
             });
 
-            $currentSong.bid = totalBid;
-            currentDbBid = totalBid;
-            errorMessage = 'Bid updated successfully!';
+            $currentSong.bid = newBidTotal;
+            currentDbBid = newBidTotal;
+            errorMessage = 'Bid successfully placed!';
+            dispatch('bidUpdated');
             
         } catch (error) {
             errorMessage = 'Error updating bid. Please try again.';
@@ -78,7 +85,7 @@
     }
 
     function decrementBid() {
-        if (userBid > minBid) {
+        if (userBid > MINIMUM_BID_INCREMENT) {
             userBid -= MINIMUM_BID_INCREMENT;
         }
     }
@@ -88,10 +95,6 @@
         $currentSong = null;
         userBid = MINIMUM_BID_INCREMENT;
     }
-
-    onMount(() => {
-        checkCurrentBid();
-    });
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
@@ -101,12 +104,18 @@
     class="modal"
 >
     {#if $isModalOpen && $currentSong}
-        <form
-            method="dialog"
+        <div 
             class="modal-content"
-            on:submit|preventDefault={closeModal}
             transition:scale={{ duration: 200 }}
         >
+            {#if $currentSong.imageUrl}
+                <img 
+                    class="song-image"
+                    src={$currentSong.imageUrl} 
+                    alt="{$currentSong.song_name} by {$currentSong.song_artist}"
+                />
+            {/if}
+            
             <button 
                 type="button"
                 class="close-button" 
@@ -115,13 +124,38 @@
             >
                 ✕
             </button>
-            
-            <h2>{$currentSong.song_name}</h2>
-            <p class="artist">Artist: {$currentSong.song_artist}</p>
-            
-            <div class="bid-info">
-                <p class="current-bid">Current Bid: ${currentDbBid}</p>
+
+            <div class="song-details">
+                <h2>{$currentSong.song_name}</h2>
+                <p class="artist">{$currentSong.song_artist}</p>
+                
+                <div class="current-bid">
+                    Current Bid: <span class="amount">${currentDbBid}</span>
+                </div>
+
                 <div class="bid-controls">
+                    <button 
+                        type="button"
+                        on:click={decrementBid}
+                        disabled={userBid <= MINIMUM_BID_INCREMENT || loading}
+                        class="bid-button"
+                        aria-label="Decrease bid"
+                    >
+                        −
+                    </button>
+                    
+                    <div class="bid-input">
+                        <span class="currency">$</span>
+                        <input 
+                            type="number"
+                            bind:value={userBid}
+                            min={MINIMUM_BID_INCREMENT}
+                            step={MINIMUM_BID_INCREMENT}
+                            disabled={loading}
+                            aria-label="Bid amount in dollars"
+                        />
+                    </div>
+                    
                     <button 
                         type="button"
                         on:click={incrementBid}
@@ -131,63 +165,24 @@
                     >
                         +
                     </button>
-                    
-                    <div class="bid-amount">
-                        <label>
-                            <span>Your Bid:</span>
-                            <div class="input-wrapper">
-                                <span class="currency" aria-hidden="true">$</span>
-                                <input 
-                                    type="number"
-                                    bind:value={userBid}
-                                    min={minBid}
-                                    step={MINIMUM_BID_INCREMENT}
-                                    disabled={loading}
-                                    aria-label="Bid amount in dollars"
-                                />
-                            </div>
-                        </label>
-                    </div>
-                    
-                    <button 
-                        type="button"
-                        on:click={decrementBid}
-                        disabled={userBid <= minBid || loading}
-                        class="bid-button"
-                        aria-label="Decrease bid"
-                    >
-                        −
-                    </button>
                 </div>
-
-                <p class="total-bid">Total Bid: ${totalBid}</p>
+            
+                {#if errorMessage}
+                    <p class={errorMessage === 'Bid successfully placed!' ? 'success-message' : 'error-message'} role="alert">
+                        {errorMessage}
+                    </p>
+                {/if}
+                
+                <button 
+                    type="button"
+                    class="submit-button"
+                    on:click={updateBid}
+                    disabled={loading || userBid < MINIMUM_BID_INCREMENT}
+                >
+                    {loading ? 'Placing Bid...' : 'Place Bid'}
+                </button>
             </div>
-            
-            {#if errorMessage}
-                <p class="error-message" role="alert">{errorMessage}</p>
-            {/if}
-            
-            <button 
-                type="button"
-                class="submit-button"
-                on:click={updateBid}
-                disabled={loading || userBid < minBid}
-            >
-                {loading ? 'Updating...' : 'Place Bid'}
-            </button>
-            
-            <p class="min-bid-note">
-                Minimum bid increment: ${minBid}
-            </p>
-        </form>
-        
-        <!-- Invisible button to handle backdrop clicks -->
-        <button
-            type="button"
-            class="backdrop-button"
-            on:click={closeModal}
-            aria-label="Close modal"
-        />
+        </div>
     {/if}
 </dialog>
 
@@ -197,112 +192,105 @@
         max-width: 90%;
         width: 400px;
         border: none;
-        border-radius: 8px;
+        border-radius: 12px;
         background: transparent;
+        color: var(--text-light);
     }
 
     .modal::backdrop {
-        background: rgba(0, 0, 0, 0.5);
-    }
-
-    .backdrop-button {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: transparent;
-        border: none;
-        cursor: default;
-        z-index: -1;
+        background: rgba(0, 0, 0, 0.8);
+        backdrop-filter: blur(4px);
     }
 
     .modal-content {
-        background-color: white;
-        padding: 2rem;
-        border-radius: 8px;
+        background-color: #121212;
+        border-radius: 12px;
+        overflow: hidden;
         position: relative;
-        text-align: center;
+    }
+
+    .song-image {
+        width: 100%;
+        height: 200px;
+        object-fit: cover;
+    }
+
+    .song-details {
+        padding: 1.5rem;
     }
 
     .close-button {
         position: absolute;
         top: 1rem;
         right: 1rem;
-        background: none;
+        background: rgba(0, 0, 0, 0.5);
         border: none;
+        color: var(--text-light);
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
         cursor: pointer;
-        padding: 0.5rem;
-        color: #666;
-        font-size: 1.5rem;
-        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+        transition: background-color 0.2s ease;
     }
 
     .close-button:hover {
-        color: #333;
+        background: rgba(0, 0, 0, 0.7);
     }
 
     h2 {
-        margin: 0 0 0.5rem;
-        color: #2c3e50;
+        margin: 0;
+        font-size: 1.5rem;
+        color: var(--text-light);
     }
 
     .artist {
-        color: #666;
-        margin: 0 0 1.5rem;
-        font-size: 0.9rem;
+        margin: 0.25rem 0 1.5rem;
+        color: var(--text-dimmed);
+        font-size: 1rem;
     }
 
-    .bid-info {
+    .current-bid {
+        text-align: center;
+        margin-bottom: 1.5rem;
+        font-size: 1.125rem;
+    }
+
+    .amount {
+        color: var(--neon-blue);
+        font-size: 1.5rem;
+        font-weight: 700;
+        text-shadow: 0 0 10px rgba(0, 194, 255, 0.5);
+    }
+
+    .bid-controls {
         display: flex;
-        flex-direction: column;
         align-items: center;
         gap: 1rem;
         margin-bottom: 1.5rem;
     }
 
-    .current-bid {
-        font-size: 1.1rem;
-        color: #2c3e50;
-        margin: 0;
-    }
-
-    .total-bid {
-        font-size: 1.2rem;
-        font-weight: bold;
-        color: #1976d2;
-        margin: 0;
-    }
-
-    .bid-controls {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.75rem;
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        width: 100%;
-        max-width: 200px;
-    }
-
     .bid-button {
-        background-color: #e3f2fd;
-        border: none;
+        background-color: rgba(0, 194, 255, 0.1);
+        border: 1px solid var(--neon-blue);
+        color: var(--neon-blue);
         border-radius: 50%;
-        width: 2.5rem;
-        height: 2.5rem;
-        cursor: pointer;
+        width: 40px;
+        height: 40px;
         font-size: 1.5rem;
         display: flex;
         align-items: center;
         justify-content: center;
-        color: #1976d2;
+        cursor: pointer;
         transition: all 0.2s ease;
     }
 
     .bid-button:hover:not(:disabled) {
-        background-color: #bbdefb;
+        background-color: rgba(0, 194, 255, 0.2);
+        box-shadow: 0 0 10px rgba(0, 194, 255, 0.3);
     }
 
     .bid-button:disabled {
@@ -310,40 +298,29 @@
         cursor: not-allowed;
     }
 
-    .bid-amount {
-        width: 100%;
-    }
-
-    .bid-amount label {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-        width: 100%;
-    }
-
-    .bid-amount span {
-        font-size: 0.9rem;
-        color: #666;
-    }
-
-    .input-wrapper {
+    .bid-input {
+        flex: 1;
         display: flex;
         align-items: center;
-        background: white;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        padding: 0.5rem;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
     }
 
     .currency {
-        color: #2c3e50;
-        margin-right: 0.25rem;
+        color: var(--text-dimmed);
+        margin-right: 0.5rem;
     }
 
     input {
         width: 100%;
+        background: transparent;
         border: none;
-        font-size: 1.25rem;
+        color: var(--text-light);
+        font-size: 1.5rem;
+        font-family: 'Poppins', sans-serif;
+        font-weight: 700;
         text-align: center;
         padding: 0;
         margin: 0;
@@ -353,41 +330,18 @@
         outline: none;
     }
 
-    .input-wrapper:focus-within {
-        border-color: #1976d2;
-    }
-
     .error-message {
-        color: #dc3545;
-        margin: 1rem 0;
-        font-size: 0.9rem;
-    }
-
-    .submit-button {
-        width: 100%;
-        padding: 0.75rem;
-        background-color: #1976d2;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 1rem;
-        transition: background-color 0.2s ease;
-    }
-
-    .submit-button:hover:not(:disabled) {
-        background-color: #1565c0;
-    }
-
-    .submit-button:disabled {
-        background-color: #ccc;
-        cursor: not-allowed;
-    }
-
-    .min-bid-note {
+        color: #ff4444;
         text-align: center;
-        color: #666;
-        margin: 1rem 0 0;
-        font-size: 0.8rem;
+        margin: 1rem 0;
+        font-size: 0.875rem;
+    }
+
+    .success-message {
+        color: #00ff88;
+        text-align: center;
+        margin: 1rem 0;
+        font-size: 0.875rem;
+        text-shadow: 0 0;
     }
 </style>

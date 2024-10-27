@@ -3,4 +3,5 @@ export interface Song {
     song_name: string;
     song_artist: string;
     bid?: number;
+    imageUrl?: string;
 }
