@@ -12,12 +12,12 @@ export async function checkAdminStatus(uid: string) {
         const userDoc = await getDoc(doc(db, 'users', uid));
         if (userDoc.exists()) {
             isAdmin.set(userDoc.data()?.admin === true);
-        } else {
-            isAdmin.set(false);
+            return userDoc.data()?.admin === true;
         }
+        return false;
     } catch (error) {
         console.error('Error checking admin status:', error);
-        isAdmin.set(false);
+        return false;
     }
 }
 

@@ -1,37 +1,39 @@
 <script lang="ts">
     import { auth, db } from '$lib/firebase';
-    import { signInWithEmailAndPassword } from 'firebase/auth';
+    import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
     import { doc, setDoc } from 'firebase/firestore';
     import { goto } from '$app/navigation';
-    import { user, isAdmin } from '$lib/stores/auth-store';
+    import { isAdmin, checkAdminStatus } from '$lib/stores/auth-store';
 
-    let email = '';
-    let password = '';
     let error = '';
     let loading = false;
 
-    async function handleLogin() {
+    async function handleGoogleLogin() {
         loading = true;
         error = '';
         
         try {
-            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            const provider = new GoogleAuthProvider();
+            const userCredential = await signInWithPopup(auth, provider);
             
             // Create user document if it doesn't exist
             await setDoc(doc(db, 'users', userCredential.user.uid), {
                 email: userCredential.user.email,
-                admin: false
+                lastLogin: new Date()
             }, { merge: true });
             
-            // Check admin status and redirect
-            if ($isAdmin) {
+            // Check if user is admin
+            const isUserAdmin = await checkAdminStatus(userCredential.user.uid);
+            
+            if (isUserAdmin) {
                 goto('/admin');
             } else {
                 error = 'Not authorized as admin';
-                auth.signOut();
+                await auth.signOut();
             }
         } catch (e) {
-            error = 'Invalid email or password';
+            error = 'Login failed. Please try again.';
+            console.error('Login error:', e);
         } finally {
             loading = false;
         }
@@ -42,33 +44,24 @@
     <div class="login-card">
         <h1>Admin Login</h1>
         
-        <form on:submit|preventDefault={handleLogin}>
-            <div class="input-group">
-                <input
-                    type="email"
-                    bind:value={email}
-                    placeholder="Email"
-                    required
-                />
-            </div>
-            
-            <div class="input-group">
-                <input
-                    type="password"
-                    bind:value={password}
-                    placeholder="Password"
-                    required
-                />
-            </div>
-            
-            {#if error}
-                <p class="error">{error}</p>
-            {/if}
-            
-            <button type="submit" disabled={loading}>
-                {loading ? 'Loading...' : 'Login'}
-            </button>
-        </form>
+        <button 
+            class="google-button" 
+            on:click={handleGoogleLogin} 
+            disabled={loading}
+        >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="google-icon">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                <path fill="none" d="M0 0h48v48H0z"/>
+            </svg>
+            {loading ? 'Signing in...' : 'Sign in with Google'}
+        </button>
+        
+        {#if error}
+            <p class="error">{error}</p>
+        {/if}
     </div>
 </div>
 
@@ -92,48 +85,42 @@
         margin-bottom: 2rem;
     }
 
-    .input-group {
-        margin-bottom: 1rem;
-    }
-
-    input {
+    .google-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
         width: 100%;
         padding: 0.75rem;
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: white;
+        color: #757575;
+        border: none;
         border-radius: 6px;
-        color: var(--text-light);
+        cursor: pointer;
+        font-weight: 500;
+        font-family: 'Roboto', sans-serif;
+        transition: all 0.2s ease;
     }
 
-    input:focus {
-        outline: none;
-        border-color: var(--neon-blue);
+    .google-button:hover:not(:disabled) {
+        background: #f5f5f5;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .google-button:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+    }
+
+    .google-icon {
+        width: 24px;
+        height: 24px;
     }
 
     .error {
         color: #ff4444;
         text-align: center;
         margin: 1rem 0;
-    }
-
-    button {
-        width: 100%;
-        padding: 0.75rem;
-        background: var(--neon-blue);
-        color: white;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        font-weight: bold;
-        transition: all 0.2s ease;
-    }
-
-    button:hover:not(:disabled) {
-        box-shadow: 0 0 15px rgba(0, 194, 255, 0.5);
-    }
-
-    button:disabled {
-        opacity: 0.7;
-        cursor: not-allowed;
+        font-size: 0.875rem;
     }
 </style>
