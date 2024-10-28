@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
     import { auth, db } from '$lib/firebase';
     import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
     import { doc, setDoc } from 'firebase/firestore';
@@ -7,6 +8,20 @@
 
     let error = '';
     let loading = false;
+
+    onMount(() => {
+        const unsubscribe = auth.onAuthStateChanged(async (user) => {
+            if (user) {
+                const adminStatus = await checkAdminStatus(user.uid);
+                if (adminStatus) {
+                    goto('/admin');
+                }
+            }
+        });
+
+        // Return the cleanup function directly
+        return unsubscribe;
+    });
 
     async function handleGoogleLogin() {
         loading = true;
@@ -32,8 +47,8 @@
                 await auth.signOut();
             }
         } catch (e) {
-            error = 'Login failed. Please try again.';
             console.error('Login error:', e);
+            error = 'Login failed. Please try again.';
         } finally {
             loading = false;
         }
