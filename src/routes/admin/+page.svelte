@@ -204,11 +204,11 @@
             </div>
             
             <div class="input-group">
-                <label for="cover-image">Cover Image (Required)</label>
+                <label for="cover-image">Cover Image (.PNG Required)</label>
                 <input
                     id="cover-image"
                     type="file"
-                    accept="image/*"
+                    accept="image/png"
                     on:change={handleFileSelect}
                     required
                 />
