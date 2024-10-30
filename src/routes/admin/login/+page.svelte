@@ -3,11 +3,23 @@
     import { auth, db } from '$lib/firebase';
     import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
     import { doc, setDoc, getDoc } from 'firebase/firestore';
-    import { goto } from '$app/navigation';
-    import { isAdmin, checkAdminStatus } from '$lib/stores/auth-store';
+    import { isAdmin } from '$lib/stores/auth-store';
 
     let error = '';
     let loading = false;
+
+    onMount(() => {
+        // Check if already logged in and admin
+        auth.onAuthStateChanged(async (user) => {
+            if (user) {
+                const userDoc = await getDoc(doc(db, 'users', user.uid));
+                if (userDoc.exists() && userDoc.data().admin === true) {
+                    isAdmin.set(true);
+                    window.location.href = '/admin';
+                }
+            }
+        });
+    });
 
     async function handleGoogleLogin() {
         loading = true;
@@ -25,15 +37,19 @@
             
             // Check if user is admin
             const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+            
             if (userDoc.exists() && userDoc.data().admin === true) {
-                await goto('/admin');
+                isAdmin.set(true);
+                window.location.href = '/admin';
             } else {
                 error = 'Not authorized as admin';
                 await auth.signOut();
+                isAdmin.set(false);
             }
         } catch (e) {
             console.error('Login error:', e);
             error = 'Login failed. Please try again.';
+            isAdmin.set(false);
         } finally {
             loading = false;
         }
