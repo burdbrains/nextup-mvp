@@ -2,26 +2,12 @@
     import { onMount } from 'svelte';
     import { auth, db } from '$lib/firebase';
     import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-    import { doc, setDoc } from 'firebase/firestore';
+    import { doc, setDoc, getDoc } from 'firebase/firestore';
     import { goto } from '$app/navigation';
     import { isAdmin, checkAdminStatus } from '$lib/stores/auth-store';
 
     let error = '';
     let loading = false;
-
-    onMount(() => {
-        const unsubscribe = auth.onAuthStateChanged(async (user) => {
-            if (user) {
-                const adminStatus = await checkAdminStatus(user.uid);
-                if (adminStatus) {
-                    goto('/admin');
-                }
-            }
-        });
-
-        // Return the cleanup function directly
-        return unsubscribe;
-    });
 
     async function handleGoogleLogin() {
         loading = true;
@@ -31,17 +17,16 @@
             const provider = new GoogleAuthProvider();
             const userCredential = await signInWithPopup(auth, provider);
             
-            // Create user document if it doesn't exist
+            // Create/update user document
             await setDoc(doc(db, 'users', userCredential.user.uid), {
                 email: userCredential.user.email,
                 lastLogin: new Date()
             }, { merge: true });
             
             // Check if user is admin
-            const isUserAdmin = await checkAdminStatus(userCredential.user.uid);
-            
-            if (isUserAdmin) {
-                goto('/admin');
+            const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+            if (userDoc.exists() && userDoc.data().admin === true) {
+                await goto('/admin');
             } else {
                 error = 'Not authorized as admin';
                 await auth.signOut();

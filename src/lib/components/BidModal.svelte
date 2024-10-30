@@ -3,12 +3,13 @@
     import { scale } from 'svelte/transition';
     import { db } from '$lib/firebase';
     import { doc, getDoc, updateDoc } from 'firebase/firestore';
-    import { MINIMUM_BID_INCREMENT, currentSong, isModalOpen } from '$lib/stores/bid-store';
+    import { currentSong, isModalOpen } from '$lib/stores/bid-store';
+    import { maxBidIncrement, minBidIncrement, loadSettings } from '$lib/stores/settings-store';
 
     const dispatch = createEventDispatcher();
 
     let dialog: HTMLDialogElement;
-    let userBid: number = MINIMUM_BID_INCREMENT;
+    let userBid: number = $minBidIncrement;
     let errorMessage: string = '';
     let loading: boolean = false;
     let currentDbBid: number = 0;
@@ -17,10 +18,14 @@
         dialog.showModal();
         currentDbBid = $currentSong?.bid || 0;
         errorMessage = '';
-        userBid = MINIMUM_BID_INCREMENT;
+        userBid = $minBidIncrement;
     } else if (!$isModalOpen && dialog?.open) {
         dialog.close();
     }
+
+    onMount(async () => {
+        await loadSettings();
+    });
 
     function handleKeydown(event: KeyboardEvent) {
         if (event.key === 'Escape' && dialog?.open) {
@@ -56,8 +61,13 @@
             const currentBidValid = await checkCurrentBid();
             if (!currentBidValid) return;
             
-            if (userBid < MINIMUM_BID_INCREMENT) {
-                errorMessage = `Minimum bid increment is $${MINIMUM_BID_INCREMENT}`;
+            if (userBid < $minBidIncrement) {
+                errorMessage = `Minimum bid increment is $${$minBidIncrement}`;
+                return;
+            }
+
+            if (userBid > $maxBidIncrement) {
+                errorMessage = `Maximum bid increment is $${$maxBidIncrement}`;
                 return;
             }
 
@@ -81,19 +91,44 @@
     }
 
     function incrementBid() {
-        userBid += MINIMUM_BID_INCREMENT;
+        const newBid = userBid + $minBidIncrement;
+        if (newBid <= $maxBidIncrement) {
+            userBid = newBid;
+            errorMessage = '';
+        } else {
+            errorMessage = `Maximum bid increment is $${$maxBidIncrement}`;
+        }
     }
 
     function decrementBid() {
-        if (userBid > MINIMUM_BID_INCREMENT) {
-            userBid -= MINIMUM_BID_INCREMENT;
+        if (userBid > $minBidIncrement) {
+            userBid -= $minBidIncrement;
+            errorMessage = '';
         }
     }
 
     function closeModal() {
         $isModalOpen = false;
         $currentSong = null;
-        userBid = MINIMUM_BID_INCREMENT;
+        userBid = $minBidIncrement;
+    }
+
+    // Validate input when user types in a value
+    function handleBidInput(event: Event) {
+        const input = event.target as HTMLInputElement;
+        const value = Number(input.value);
+        
+        if (value > $maxBidIncrement) {
+            input.value = $maxBidIncrement.toString();
+            userBid = $maxBidIncrement;
+            errorMessage = `Maximum bid increment is $${$maxBidIncrement}`;
+        } else if (value < $minBidIncrement) {
+            userBid = $minBidIncrement;
+            errorMessage = `Minimum bid increment is $${$minBidIncrement}`;
+        } else {
+            userBid = value;
+            errorMessage = '';
+        }
     }
 </script>
 
@@ -131,13 +166,16 @@
                 
                 <div class="current-bid">
                     Current Bid: <span class="amount">${currentDbBid}</span>
+                    <div class="bid-limits">
+                        Min Increment: ${$minBidIncrement} | Max Bid: ${$maxBidIncrement}
+                    </div>
                 </div>
 
                 <div class="bid-controls">
                     <button 
                         type="button"
                         on:click={decrementBid}
-                        disabled={userBid <= MINIMUM_BID_INCREMENT || loading}
+                        disabled={userBid <= $minBidIncrement || loading}
                         class="bid-button"
                         aria-label="Decrease bid"
                     >
@@ -149,8 +187,10 @@
                         <input 
                             type="number"
                             bind:value={userBid}
-                            min={MINIMUM_BID_INCREMENT}
-                            step={MINIMUM_BID_INCREMENT}
+                            min={$minBidIncrement}
+                            max={$maxBidIncrement}
+                            step={$minBidIncrement}
+                            on:input={handleBidInput}
                             disabled={loading}
                             aria-label="Bid amount in dollars"
                         />
@@ -159,7 +199,7 @@
                     <button 
                         type="button"
                         on:click={incrementBid}
-                        disabled={loading}
+                        disabled={loading || userBid >= $maxBidIncrement}
                         class="bid-button"
                         aria-label="Increase bid"
                     >
@@ -177,7 +217,7 @@
                     type="button"
                     class="submit-button"
                     on:click={updateBid}
-                    disabled={loading || userBid < MINIMUM_BID_INCREMENT}
+                    disabled={loading || userBid < $minBidIncrement || userBid > $maxBidIncrement}
                 >
                     {loading ? 'Placing Bid...' : 'Place Bid'}
                 </button>
@@ -187,6 +227,14 @@
 </dialog>
 
 <style>
+    /* Previous styles remain the same */
+    .bid-limits {
+        font-size: 0.875rem;
+        color: var(--text-dimmed);
+        margin-top: 0.25rem;
+        text-align: center;
+    }
+    
     .modal {
         padding: 0;
         max-width: 90%;

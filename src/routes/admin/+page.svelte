@@ -16,6 +16,12 @@
     } from 'firebase/firestore';
     import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
     import type { Song } from '$lib/types/song';
+    // Add to your existing imports
+    import { maxBidIncrement, minBidIncrement, loadSettings } from '$lib/stores/settings-store';
+
+    // Add to your existing let declarations
+    let newMaxBid = $maxBidIncrement;
+    let newMinInc = $minBidIncrement;
 
     let loading = true;
     let songs: Song[] = [];
@@ -32,6 +38,24 @@
     let selectedFile: File | null = null;
     let uploadingNew = false;
 
+    async function updateBidSettings() {
+        try {
+            await updateDoc(doc(db, 'settings', 'bid'), {
+                max_bid: newMaxBid,
+                min_inc: newMinInc
+            });
+            
+            // Update the stores
+            maxBidIncrement.set(newMaxBid);
+            minBidIncrement.set(newMinInc);
+            
+            showMessage('Bid settings updated successfully');
+        } catch (error) {
+            showMessage('Error updating bid settings', true);
+            console.error(error);
+        }
+    }
+
     onMount(() => {
         const unsubscribe = auth.onAuthStateChanged(async (user) => {
             if (!user) {
@@ -45,11 +69,14 @@
                 return;
             }
 
+            await loadSettings();
+            newMaxBid = $maxBidIncrement;
+            newMinInc = $minBidIncrement;
             await loadSongs();
             loading = false;
         });
 
-        return unsubscribe;
+    return unsubscribe;
     });
 
     async function loadSongs() {
@@ -235,6 +262,45 @@
         </div>
     </section>
 
+    <!-- Bid Settings -->
+    <section class="card">
+        <h2>Bid Settings</h2>
+        <div class="settings-grid">
+            <div class="input-group">
+                <label for="max-bid">Maximum Bid Increment ($)</label>
+                <input
+                    id="max-bid"
+                    type="number"
+                    bind:value={newMaxBid}
+                    min={newMinInc}
+                    step="1"
+                    placeholder="Enter maximum bid increment"
+                />
+            </div>
+            
+            <div class="input-group">
+                <label for="min-inc">Minimum Bid Increment ($)</label>
+                <input
+                    id="min-inc"
+                    type="number"
+                    bind:value={newMinInc}
+                    min="1"
+                    max={newMaxBid}
+                    step="1"
+                    placeholder="Enter minimum bid increment"
+                />
+            </div>
+            
+            <button 
+                class="update-settings-button"
+                on:click={updateBidSettings}
+                disabled={newMinInc > newMaxBid}
+            >
+                Update Bid Settings
+            </button>
+        </div>
+    </section>
+
     <!-- Manage Songs -->
     <section class="card">
         <h2>Manage Songs</h2>
@@ -412,6 +478,17 @@
     .message.error {
         background: #ff4444;
         color: white;
+    }
+
+    .settings-grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    }
+
+    .update-settings-button {
+        grid-column: 1 / -1;
+        background: var(--neon-blue);
     }
 
     @keyframes fadeIn {
