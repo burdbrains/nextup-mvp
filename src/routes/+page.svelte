@@ -15,6 +15,7 @@
 
     let songs: Song[] = [];
     let nextUpSong: Song | null = null;
+    let logoUrl: string = '/src/lib/assets/nextup.png'; // Add this line to store the logo URL
 
     async function getImageUrl(songId: string): Promise<string> {
         try {
@@ -89,6 +90,9 @@
             <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zM12 11.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/>
         </svg>
         <h1>Capital Factory</h1>
+        {#if logoUrl}
+            <img src="{logoUrl}" class="logo" />
+        {/if}
     </div>
 </div>
 
@@ -171,5 +175,9 @@
         margin-bottom: 1rem;
         text-transform: uppercase;
         letter-spacing: 1px;
+    }
+
+    .logo {
+        height: 4rem; /* Adjust the height as needed */
     }
 </style>
