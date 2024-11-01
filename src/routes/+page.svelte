@@ -2,19 +2,22 @@
     import { db, storage } from '$lib/firebase';
     import {
         collection,
-        getDocs,
         query,
         orderBy,
-        limit
+        limit,
+        onSnapshot,
+        type QuerySnapshot,
+        type DocumentData
     } from 'firebase/firestore';
     import { getDownloadURL, ref } from 'firebase/storage';
-    import { onMount } from 'svelte';
+    import { onMount, onDestroy } from 'svelte';
     import SongCard from '$lib/components/SongCard.svelte';
     import BidModal from '$lib/components/BidModal.svelte';
     import type { Song } from '$lib/types/song';
 
     let songs: Song[] = [];
     let nextUpSong: Song | null = null;
+    let unsubscribeQueue: (() => void) | null = null;
 
     async function getImageUrl(songId: string): Promise<string> {
         try {
@@ -26,60 +29,54 @@
         }
     }
 
-    async function getNextUpSong(): Promise<Song | null> {
-        const collectionRef = collection(db, 'songs');
-        const q = query(collectionRef, orderBy('bid', 'desc'), limit(1));
-        const querySnapshot = await getDocs(q);
-        
-        if (querySnapshot.empty) return null;
-        
-        const songDoc = querySnapshot.docs[0];
-        const imageUrl = await getImageUrl(songDoc.id);
-        
-        return {
-            id: songDoc.id,
-            ...songDoc.data(),
-            imageUrl
-        } as Song;
-    }
-
-    async function getRemainingongs(): Promise<Song[]> {
-        const collectionRef = collection(db, 'songs');
-        const querySnapshot = await getDocs(collectionRef);
-        
+    async function processSnapshot(snapshot: QuerySnapshot<DocumentData>): Promise<Song[]> {
         const songsWithImages = await Promise.all(
-            querySnapshot.docs
-                .map(async doc => ({
-                    id: doc.id,
-                    ...doc.data(),
-                    imageUrl: await getImageUrl(doc.id)
-                } as Song))
+            snapshot.docs.map(async doc => ({
+                id: doc.id,
+                ...doc.data(),
+                imageUrl: await getImageUrl(doc.id)
+            } as Song))
         );
-
-        return songsWithImages
-            .filter(song => song.id !== nextUpSong?.id)
-            .sort((a, b) => (b.bid || 0) - (a.bid || 0));
+        return songsWithImages.sort((a, b) => (b.bid || 0) - (a.bid || 0));
     }
 
-    async function refreshQueue() {
-        try {
-            nextUpSong = await getNextUpSong();
-            songs = await getRemainingongs();
-        } catch (error) {
-            console.error("Error refreshing queue:", error);
-        }
+    function setupRealtimeListeners() {
+        const collectionRef = collection(db, 'songs');
+        
+        // Set up real-time listener
+        unsubscribeQueue = onSnapshot(collectionRef, async (snapshot) => {
+            try {
+                const processedSongs = await processSnapshot(snapshot);
+                
+                // Update next up song (highest bid)
+                nextUpSong = processedSongs[0] || null;
+                
+                // Update remaining songs
+                songs = processedSongs.slice(1);
+                
+            } catch (error) {
+                console.error("Error processing real-time update:", error);
+            }
+        }, (error) => {
+            console.error("Error in real-time listener:", error);
+        });
     }
 
-    onMount(async () => {
-        try {
-            await refreshQueue();
-        } catch (error) {
-            console.error("Error fetching songs:", error);
+    onMount(() => {
+        setupRealtimeListeners();
+    });
+
+    onDestroy(() => {
+        // Clean up listener when component is destroyed
+        if (unsubscribeQueue) {
+            unsubscribeQueue();
         }
     });
 
+    // No longer need handleBidUpdated since updates are real-time
     function handleBidUpdated() {
-        refreshQueue();
+        // Keep this empty function to maintain compatibility with BidModal
+        // or remove the handler if BidModal doesn't require it
     }
 </script>
 
